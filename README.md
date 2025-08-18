@@ -15,3 +15,11 @@ yay -S rofi-wayland foot xdg-desktop-portal-wlr swaybg waybar wl-clip-persist cl
 ```bash
 git clone https://github.com/Dreammango/mango-config.git ~/.config/mango
 ```
+## Some Common Default Keybindings
+
+- alt+return: open foot terminal
+- alt+space: open rofi launcher
+- alt+q: kill client
+- alt+left/right/up/down: focus direction
+- super+m: quit mango
+
