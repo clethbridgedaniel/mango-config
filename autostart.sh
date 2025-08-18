@@ -19,8 +19,6 @@ swaybg -i ~/.config/mango/wallpaper/czd.png >/dev/null 2>&1 &
 # top bar
 waybar -c ~/.config/mango/waybar/config -s ~/.config/mango/waybar/style.css >/dev/null 2>&1 &
 
-# dock
-lavalauncher -c ~/.config/mango/lavalauncher/lavalauncher.conf >/dev/null 2>&1 &
 
 # xwayland dpi scale
 echo "Xft.dpi: 140" | xrdb -merge #dpi缩放
