@@ -5,7 +5,6 @@ set +e
 
 # obs
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=wlroots >/dev/null 2>&1
-/usr/lib/xdg-desktop-portal-wlr >/dev/null 2>&1 &
 
 # notify
 swaync -c ~/.config/mango/swaync/config.json -s ~/.config/mango/swaync/style.css >/dev/null 2>&1 &
