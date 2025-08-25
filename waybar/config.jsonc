@@ -8,7 +8,7 @@
     "reload_style_on_change": true,
     "height": 45,
     "modules-left": [
-       // "ext/workspaces",
+        // "ext/workspaces",
         "dwl/tags",
         "wlr/taskbar",
         "dwl/window"
@@ -28,7 +28,7 @@
       "format": "{icon}",
       "ignore-hidden": true,
       "on-click": "activate",
-      "sort-by-number": true
+      "sort-by-id": true
     },
     "dwl/tags": {
       "num-tags": 9,
@@ -57,14 +57,6 @@
       "on-click": "sleep 0.1s && swaync-client -t -sw",
       "on-click-right": "swaync-client -d -sw",
       "escape": true
-    },
-    "custom/updates": {
-        "format": "󰚰 {}",
-        "interval": 300,                     // every 5 min
-        "exec": "i=$(checkupdates); echo \"$i\" |wc -l; echo \"$i\" |column -t |tr '\n' '\r'",       // # of updates and tooltip details
-        "exec-if": "exit 0",                  // always run; consider advanced run conditions
-        "on-click": "kitty -e yay -Syu", // update system
-        "signal": 8
     },
     "keyboard-state": {
         "numlock": false,
@@ -173,8 +165,8 @@
   		  "menu-file": "~/.config/mango/waybar/battery_menu.xml",
 		    "menu-actions": {
 			   "performance": "bash ~/.config/mango/scripts/power-profile  --performance",
-			   "schedutil": "bash ~/.config/mango/scripts/power-profile --schedutil",
-        },
+			   "schedutil": "bash ~/.config/mango/scripts/power-profile --schedutil"
+        }
     },
     "pulseaudio#microphone": {
         "format": "{format_source}",
