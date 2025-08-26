@@ -12,4 +12,4 @@ swayidle \
 	timeout 1800 'wlr-dpms off' \
 	resume 'wlr-dpms on && ~/.config/mango/scripts/restart_wlsunset.sh' \
 	timeout 300 'dimland -a 0.3' \
-	resume '~/.config/mango/scripts/exitdim.sh'
+	resume 'bash ~/.config/mango/scripts/exitdim.sh'
