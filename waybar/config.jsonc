@@ -8,8 +8,8 @@
     "reload_style_on_change": true,
     "height": 45,
     "modules-left": [
-        // "ext/workspaces",
-        "dwl/tags",
+        "ext/workspaces",
+        // "dwl/tags",
         "wlr/taskbar",
         "dwl/window"
     ],
@@ -27,7 +27,9 @@
     "ext/workspaces": {
       "format": "{icon}",
       "ignore-hidden": true,
+      // "active-only":true,
       "on-click": "activate",
+      "on-click-right": "deactivate",
       "sort-by-id": true,
       // "format-icons": {
       //   "1": "",
@@ -206,10 +208,10 @@
         }
     },
     "cava": {
-        "framerate": 40,
+        "framerate": 30,
         "autosens": 0,
         "sensitivity": 38,
-        "bars": 18,
+        "bars": 8,
         "lower_cutoff_freq": 50,
         "higher_cutoff_freq": 12000,
         "method": "pulse",
