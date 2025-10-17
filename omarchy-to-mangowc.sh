@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Omarchy to MangoWC Theme Converter v1.0
-# Converts Omarchy themes (eg https://github.com/somerocketeer/omarchy-bauhaus-theme) to MangoWC format
+# Omarchy to MangoWC Theme Converter v0.2
+# Converts all Omarchy themes from ~/.config/omarchy/themes to MangoWC format
 # Compatible with MangoWC (https://github.com/DreamMaoMao/mangowc)
 
 set -euo pipefail
@@ -10,14 +10,19 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Global variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-THEME_NAME=""
-OUTPUT_DIR=""
-THEME_SOURCE_DIR=""
+OMARCHY_THEMES_DIR="${HOME}/.config/omarchy/themes"
+OUTPUT_DIR="${HOME}/.config/mango/themes"
 VERBOSE=false
+DRY_RUN=false
+INTERACTIVE=false
+SELECTED_THEMES=()
+CONVERSION_STATS=()
 
 # Logging functions
 log_info() {
@@ -42,32 +47,49 @@ log_verbose() {
     fi
 }
 
+log_debug() {
+    if [[ "$DEBUG" == true ]]; then
+        echo -e "${MAGENTA}[DEBUG]${NC} $1"
+    fi
+}
+
 # Display help information
 show_help() {
     cat << EOF
-Omarchy to MangoWC Theme Converter
+Omarchy to MangoWC Bulk Theme Converter v2.0
 
 USAGE:
-    $0 [OPTIONS] <theme_source_directory> <output_directory>
-
-ARGUMENTS:
-    theme_source_directory    Path to the Omarchy theme directory containing palette.yml
-    output_directory          Directory where converted MangoWC theme will be saved
+    $0 [OPTIONS]
 
 OPTIONS:
-    -n, --name NAME          Name for the converted theme (default: derived from source directory)
+    -s, --source DIR         Source directory containing Omarchy themes (default: ~/.config/omarchy/themes)
+    -o, --output DIR         Output directory for MangoWC themes (default: ~/.config/mango/themes)
+    -t, --themes THEME1,THEME2 Comma-separated list of specific themes to convert
     -v, --verbose            Enable verbose output
+    -d, --dry-run            Show what would be converted without actually converting
+    -i, --interactive        Interactive mode - select themes to convert
     -h, --help               Show this help message
 
-EXAMPLE:
-    $0 --name "bauhaus-mango" ./omarchy-bauhaus-theme ~/.config/mango/themes
+EXAMPLES:
+    # Convert all themes in default directory
+    $0
+
+    # Convert specific themes only
+    $0 --themes "bauhaus,nagai-poolside"
+
+    # Interactive mode with custom directories
+    $0 --interactive --source ~/my-themes --output ~/mango-themes
+
+    # Dry run to see what would be converted
+    $0 --dry-run --verbose
 
 DESCRIPTION:
-    This script converts Omarchy themes to MangoWC format by:
-    - Parsing palette.yml for color definitions
-    - Mapping colors to MangoWC configuration format
-    - Generating compatible theme files
-    - Creating necessary directory structure
+    This script automatically discovers and converts all Omarchy themes to MangoWC format:
+    - Scans ~/.config/omarchy/themes for theme directories
+    - Converts each theme with palette.yml to MangoWC format
+    - Generates configurations for MangoWC, Waybar, terminals, etc.
+    - Creates installation scripts for each theme
+    - Provides batch conversion with statistics
 
 EOF
 }
@@ -76,12 +98,28 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -n|--name)
-                THEME_NAME="$2"
+            -s|--source)
+                OMARCHY_THEMES_DIR="$2"
+                shift 2
+                ;;
+            -o|--output)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            -t|--themes)
+                IFS=',' read -ra SELECTED_THEMES <<< "$2"
                 shift 2
                 ;;
             -v|--verbose)
                 VERBOSE=true
+                shift
+                ;;
+            -d|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -i|--interactive)
+                INTERACTIVE=true
                 shift
                 ;;
             -h|--help)
@@ -94,80 +132,140 @@ parse_args() {
                 exit 1
                 ;;
             *)
-                if [[ -z "$THEME_SOURCE_DIR" ]]; then
-                    THEME_SOURCE_DIR="$1"
-                elif [[ -z "$OUTPUT_DIR" ]]; then
-                    OUTPUT_DIR="$1"
-                else
-                    log_error "Too many arguments"
-                    show_help
-                    exit 1
-                fi
-                shift
+                log_error "Unexpected argument: $1"
+                show_help
+                exit 1
                 ;;
         esac
     done
 
-    # Validate required arguments
-    if [[ -z "$THEME_SOURCE_DIR" || -z "$OUTPUT_DIR" ]]; then
-        log_error "Missing required arguments"
-        show_help
-        exit 1
-    fi
-
-    # Set default theme name if not provided
-    if [[ -z "$THEME_NAME" ]]; then
-        THEME_NAME=$(basename "$THEME_SOURCE_DIR" | sed 's/omarchy-//g' | sed 's/-theme//g')
-    fi
-
-    log_verbose "Theme source directory: $THEME_SOURCE_DIR"
+    log_verbose "Source directory: $OMARCHY_THEMES_DIR"
     log_verbose "Output directory: $OUTPUT_DIR"
-    log_verbose "Theme name: $THEME_NAME"
+    log_verbose "Interactive mode: $INTERACTIVE"
+    log_verbose "Dry run mode: $DRY_RUN"
 }
 
-# Validate input directory and files
-validate_input() {
-    log_info "Validating input directory and files..."
+# Validate input directory and tools
+validate_environment() {
+    log_info "Validating environment..."
 
-    if [[ ! -d "$THEME_SOURCE_DIR" ]]; then
-        log_error "Theme source directory does not exist: $THEME_SOURCE_DIR"
-        exit 1
-    fi
-
-    local palette_file="$THEME_SOURCE_DIR/palette.yml"
-    if [[ ! -f "$palette_file" ]]; then
-        log_error "palette.yml not found in theme source directory: $palette_file"
+    # Check source directory
+    if [[ ! -d "$OMARCHY_THEMES_DIR" ]]; then
+        log_error "Omarchy themes directory does not exist: $OMARCHY_THEMES_DIR"
+        log_info "Please ensure Omarchy is installed and themes are available"
         exit 1
     fi
 
     # Check for required tools
+    local missing_tools=()
     for tool in yq; do
         if ! command -v "$tool" &> /dev/null; then
-            log_error "Required tool not found: $tool"
-            log_info "Please install yq (https://github.com/mikefarah/yq) to parse YAML files"
-            exit 1
+            missing_tools+=("$tool")
         fi
     done
 
-    log_success "Input validation completed"
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        log_error "Missing required tools: ${missing_tools[*]}"
+        log_info "Install missing tools:"
+        for tool in "${missing_tools[@]}"; do
+            case $tool in
+                yq)
+                    log_info "  - yq: sudo pip install yq or sudo pacman -S go-yq"
+                    ;;
+            esac
+        done
+        exit 1
+    fi
+
+    log_success "Environment validation completed"
 }
 
-# Create output directory structure
-create_output_structure() {
-    log_info "Creating output directory structure..."
+# Discover available themes
+discover_themes() {
+    log_info "Discovering Omarchy themes in: $OMARCHY_THEMES_DIR"
+    
+    local themes=()
+    while IFS= read -r -d '' theme_dir; do
+        local theme_name
+        theme_name=$(basename "$theme_dir")
+        local palette_file="$theme_dir/palette.yml"
+        
+        if [[ -f "$palette_file" ]]; then
+            themes+=("$theme_name")
+            log_verbose "Found valid theme: $theme_name"
+        else
+            log_verbose "Skipping directory without palette.yml: $theme_name"
+        fi
+    done < <(find "$OMARCHY_THEMES_DIR" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
 
-    mkdir -p "$OUTPUT_DIR"
-    local theme_output_dir="$OUTPUT_DIR/$THEME_NAME"
-    mkdir -p "$theme_output_dir"
+    if [[ ${#themes[@]} -eq 0 ]]; then
+        log_warning "No valid themes found in $OMARCHY_THEMES_DIR"
+        log_info "Make sure theme directories contain palette.yml files"
+        exit 1
+    fi
 
-    log_verbose "Created theme output directory: $theme_output_dir"
-    echo "$theme_output_dir"
+    log_success "Found ${#themes[@]} themes: ${themes[*]}"
+    printf '%s\n' "${themes[@]}"
+}
+
+# Interactive theme selection
+select_themes_interactive() {
+    local available_themes=("$@")
+    
+    echo -e "\n${CYAN}Available Omarchy Themes:${NC}"
+    for i in "${!available_themes[@]}"; do
+        printf "  %d) %s\n" $((i+1)) "${available_themes[i]}"
+    done
+    
+    echo -e "\n${CYAN}Selection Options:${NC}"
+    echo "  - Enter numbers separated by spaces (e.g., 1 3 5)"
+    echo "  - Enter 'all' to select all themes"
+    echo "  - Enter 'none' to skip selection"
+    
+    while true; do
+        read -p "Select themes to convert: " selection
+        
+        case "$selection" in
+            all)
+                SELECTED_THEMES=("${available_themes[@]}")
+                break
+                ;;
+            none)
+                SELECTED_THEMES=()
+                break
+                ;;
+            *)
+                # Parse numeric selection
+                local selected=()
+                local valid=true
+                for num in $selection; do
+                    if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le ${#available_themes[@]} ]]; then
+                        selected+=("${available_themes[$((num-1))]}")
+                    else
+                        valid=false
+                        break
+                    fi
+                done
+                
+                if [[ "$valid" == true ]] && [[ ${#selected[@]} -gt 0 ]]; then
+                    SELECTED_THEMES=("${selected[@]}")
+                    break
+                else
+                    log_warning "Invalid selection. Please try again."
+                fi
+                ;;
+        esac
+    done
+    
+    log_info "Selected themes: ${SELECTED_THEMES[*]}"
 }
 
 # Parse palette.yml and extract colors
 parse_palette() {
-    local palette_file="$THEME_SOURCE_DIR/palette.yml"
-    log_info "Parsing palette file: $palette_file"
+    local theme_dir="$1"
+    local palette_file="$theme_dir/palette.yml"
+    
+    log_verbose "Parsing palette file: $palette_file"
 
     # Declare associative arrays for color mapping
     declare -gA colors
@@ -178,14 +276,14 @@ parse_palette() {
     # Parse main colors
     local main_colors
     main_colors=$(yq eval '. | to_entries | .[] | "\(.key)=\(.value)"' "$palette_file" 2>/dev/null || {
-        log_error "Failed to parse palette.yml"
-        exit 1
+        log_error "Failed to parse palette.yml in $theme_dir"
+        return 1
     })
 
     while IFS='=' read -r key value; do
         if [[ -n "$key" && -n "$value" ]]; then
             colors["$key"]="$value"
-            log_verbose "Parsed color: $key = $value"
+            log_debug "Parsed color: $key = $value"
         fi
     done <<< "$main_colors"
 
@@ -196,7 +294,7 @@ parse_palette() {
         while IFS='=' read -r key value; do
             if [[ -n "$key" && -n "$value" ]]; then
                 ansi_colors["$key"]="$value"
-                log_verbose "Parsed ANSI color: $key = $value"
+                log_debug "Parsed ANSI color: $key = $value"
             fi
         done <<< "$ansi_normal"
     fi
@@ -207,7 +305,7 @@ parse_palette() {
         while IFS='=' read -r key value; do
             if [[ -n "$key" && -n "$value" ]]; then
                 ansi_bright_colors["$key"]="$value"
-                log_verbose "Parsed ANSI bright color: $key = $value"
+                log_debug "Parsed ANSI bright color: $key = $value"
             fi
         done <<< "$ansi_bright"
     fi
@@ -218,23 +316,24 @@ parse_palette() {
         while IFS='=' read -r key value; do
             if [[ -n "$key" && -n "$value" ]]; then
                 ansi_dim_colors["$key"]="$value"
-                log_verbose "Parsed ANSI dim color: $key = $value"
+                log_debug "Parsed ANSI dim color: $key = $value"
             fi
         done <<< "$ansi_dim"
     fi
 
-    log_success "Palette parsing completed"
+    log_verbose "Palette parsing completed for $(basename "$theme_dir")"
 }
 
 # Generate MangoWC configuration file
 generate_mangowc_config() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local config_file="$theme_output_dir/config.conf"
 
-    log_info "Generating MangoWC configuration..."
+    log_verbose "Generating MangoWC configuration for $theme_name"
 
     cat > "$config_file" << EOF
-# MangoWC Theme: $THEME_NAME
+# MangoWC Theme: $theme_name
 # Converted from Omarchy theme
 # Generated on: $(date)
 
@@ -289,18 +388,19 @@ state_inactive_color ${colors[text_dim]:-$98A0AE}
 
 EOF
 
-    log_success "MangoWC configuration generated: $config_file"
+    log_verbose "MangoWC configuration generated: $config_file"
 }
 
 # Generate Waybar style configuration
 generate_waybar_style() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local style_file="$theme_output_dir/waybar.css"
 
-    log_info "Generating Waybar style configuration..."
+    log_verbose "Generating Waybar style for $theme_name"
 
     cat > "$style_file" << EOF
-/* Waybar Theme: $THEME_NAME */
+/* Waybar Theme: $theme_name */
 /* Converted from Omarchy theme */
 /* Generated on: $(date) */
 
@@ -364,34 +464,36 @@ window {
 
 EOF
 
-    log_success "Waybar style generated: $style_file"
+    log_verbose "Waybar style generated: $style_file"
 }
 
-# Generate terminal configuration
-generate_terminal_config() {
+# Generate terminal configurations
+generate_terminal_configs() {
     local theme_output_dir="$1"
+    local theme_name="$2"
+    local theme_source_dir="$2"
     
-    log_info "Generating terminal configurations..."
+    log_verbose "Generating terminal configurations for $theme_name"
 
     # Generate Alacritty config
-    if [[ -f "$THEME_SOURCE_DIR/alacritty.toml" ]]; then
-        cp "$THEME_SOURCE_DIR/alacritty.toml" "$theme_output_dir/"
+    if [[ -f "$theme_source_dir/alacritty.toml" ]]; then
+        cp "$theme_source_dir/alacritty.toml" "$theme_output_dir/"
         log_verbose "Copied existing Alacritty configuration"
     else
-        generate_alacritty_config "$theme_output_dir"
+        generate_alacritty_config "$theme_output_dir" "$theme_name"
     fi
 
     # Generate Kitty config
-    if [[ -f "$THEME_SOURCE_DIR/kitty.conf" ]]; then
-        cp "$THEME_SOURCE_DIR/kitty.conf" "$theme_output_dir/"
+    if [[ -f "$theme_source_dir/kitty.conf" ]]; then
+        cp "$theme_source_dir/kitty.conf" "$theme_output_dir/"
         log_verbose "Copied existing Kitty configuration"
     else
-        generate_kitty_config "$theme_output_dir"
+        generate_kitty_config "$theme_output_dir" "$theme_name"
     fi
 
     # Generate Ghostty config
-    if [[ -f "$THEME_SOURCE_DIR/ghostty.conf" ]]; then
-        cp "$THEME_SOURCE_DIR/ghostty.conf" "$theme_output_dir/"
+    if [[ -f "$theme_source_dir/ghostty.conf" ]]; then
+        cp "$theme_source_dir/ghostty.conf" "$theme_output_dir/"
         log_verbose "Copied existing Ghostty configuration"
     fi
 }
@@ -399,10 +501,11 @@ generate_terminal_config() {
 # Generate Alacritty configuration
 generate_alacritty_config() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local config_file="$theme_output_dir/alacritty.toml"
 
     cat > "$config_file" << EOF
-# Alacritty Theme: $THEME_NAME
+# Alacritty Theme: $theme_name
 # Converted from Omarchy theme
 # Generated on: $(date)
 
@@ -446,16 +549,17 @@ white = "${ansi_dim_colors[white]:-$C6CED8}"
 
 EOF
 
-    log_success "Alacritty configuration generated: $config_file"
+    log_verbose "Alacritty configuration generated: $config_file"
 }
 
 # Generate Kitty configuration
 generate_kitty_config() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local config_file="$theme_output_dir/kitty.conf"
 
     cat > "$config_file" << EOF
-# Kitty Theme: $THEME_NAME
+# Kitty Theme: $theme_name
 # Converted from Omarchy theme
 # Generated on: $(date)
 
@@ -483,18 +587,19 @@ color15 ${ansi_bright_colors[white]:-$EAEFF5}
 
 EOF
 
-    log_success "Kitty configuration generated: $config_file"
+    log_verbose "Kitty configuration generated: $config_file"
 }
 
 # Generate Mako notification configuration
 generate_mako_config() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local config_file="$theme_output_dir/mako.conf"
 
-    log_info "Generating Mako notification configuration..."
+    log_verbose "Generating Mako configuration for $theme_name"
 
     cat > "$config_file" << EOF
-# Mako Theme: $THEME_NAME
+# Mako Theme: $theme_name
 # Converted from Omarchy theme
 # Generated on: $(date)
 
@@ -524,18 +629,19 @@ border-color=${colors[error]:-$CB886D}
 
 EOF
 
-    log_success "Mako configuration generated: $config_file"
+    log_verbose "Mako configuration generated: $config_file"
 }
 
 # Generate SwayOSD configuration
 generate_swayosd_config() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local config_file="$theme_output_dir/swayosd.css"
 
-    log_info "Generating SwayOSD configuration..."
+    log_verbose "Generating SwayOSD configuration for $theme_name"
 
     cat > "$config_file" << EOF
-/* SwayOSD Theme: $THEME_NAME */
+/* SwayOSD Theme: $theme_name */
 /* Converted from Omarchy theme */
 /* Generated on: $(date) */
 
@@ -567,15 +673,16 @@ window {
 
 EOF
 
-    log_success "SwayOSD configuration generated: $config_file"
+    log_verbose "SwayOSD configuration generated: $config_file"
 }
 
 # Generate installation script
 generate_install_script() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local install_script="$theme_output_dir/install.sh"
 
-    log_info "Generating installation script..."
+    log_verbose "Generating installation script for $theme_name"
 
     cat > "$install_script" << 'EOF'
 #!/usr/bin/env bash
@@ -645,24 +752,25 @@ main "$@"
 EOF
 
     chmod +x "$install_script"
-    log_success "Installation script generated: $install_script"
+    log_verbose "Installation script generated: $install_script"
 }
 
 # Generate README file
 generate_readme() {
     local theme_output_dir="$1"
+    local theme_name="$2"
     local readme_file="$theme_output_dir/README.md"
 
-    log_info "Generating README file..."
+    log_verbose "Generating README for $theme_name"
 
     cat > "$readme_file" << EOF
-# $THEME_NAME Theme for MangoWC
+# $theme_name Theme for MangoWC
 
 This theme was automatically converted from an Omarchy theme using the Omarchy to MangoWC Theme Converter.
 
 ## Theme Information
 
-- **Name**: $THEME_NAME
+- **Name**: $theme_name
 - **Generated**: $(date)
 - **Source**: Omarchy theme system
 - **Target**: MangoWC Wayland compositor
@@ -695,7 +803,7 @@ This theme was automatically converted from an Omarchy theme using the Omarchy t
 
 2. Add the following to your MangoWC configuration file:
    \`\`\`
-   @include ~/.config/mango/themes/$THEME_NAME/config.conf
+   @include ~/.config/mango/themes/$theme_name/config.conf
    \`\`\`
 
 3. Restart MangoWC to apply the theme.
@@ -721,44 +829,157 @@ This theme maintains the same license as the original Omarchy theme.
 
 EOF
 
-    log_success "README file generated: $readme_file"
+    log_verbose "README file generated: $readme_file"
+}
+
+# Convert a single theme
+convert_theme() {
+    local theme_name="$1"
+    local theme_source_dir="$OMARCHY_THEMES_DIR/$theme_name"
+    local theme_output_dir="$OUTPUT_DIR/$theme_name"
+    
+    log_info "Converting theme: $theme_name"
+    
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY RUN] Would convert: $theme_source_dir -> $theme_output_dir"
+        return 0
+    fi
+
+    # Create output directory
+    mkdir -p "$theme_output_dir"
+    
+    # Parse palette
+    if ! parse_palette "$theme_source_dir"; then
+        log_error "Failed to parse palette for theme: $theme_name"
+        return 1
+    fi
+    
+    # Generate configuration files
+    generate_mangowc_config "$theme_output_dir" "$theme_name"
+    generate_waybar_style "$theme_output_dir" "$theme_name"
+    generate_terminal_configs "$theme_output_dir" "$theme_name" "$theme_source_dir"
+    generate_mako_config "$theme_output_dir" "$theme_name"
+    generate_swayosd_config "$theme_output_dir" "$theme_name"
+    
+    # Generate documentation and installation script
+    generate_install_script "$theme_output_dir" "$theme_name"
+    generate_readme "$theme_output_dir" "$theme_name"
+    
+    log_success "Theme conversion completed: $theme_name"
+    return 0
+}
+
+# Display conversion statistics
+show_statistics() {
+    echo -e "\n${CYAN}Conversion Summary:${NC}"
+    echo "=================="
+    
+    local total=${#CONVERSION_STATS[@]}
+    local successful=0
+    local failed=0
+    
+    for result in "${CONVERSION_STATS[@]}"; do
+        if [[ "$result" == "success" ]]; then
+            ((successful++))
+        else
+            ((failed++))
+        fi
+    done
+    
+    echo -e "Total themes processed: ${BLUE}$total${NC}"
+    echo -e "Successfully converted: ${GREEN}$successful${NC}"
+    echo -e "Failed conversions: ${RED}$failed${NC}"
+    
+    if [[ "$successful" -gt 0 ]]; then
+        echo -e "\n${GREEN}Successfully converted themes are available in:${NC}"
+        echo -e "${BLUE}$OUTPUT_DIR${NC}"
+    fi
 }
 
 # Main conversion function
-convert_theme() {
-    log_info "Starting theme conversion process..."
+convert_all_themes() {
+    local themes_to_convert=("$@")
     
-    # Create output structure
-    local theme_output_dir
-    theme_output_dir=$(create_output_structure)
+    if [[ ${#themes_to_convert[@]} -eq 0 ]]; then
+        log_warning "No themes selected for conversion"
+        return 0
+    fi
     
-    # Parse palette
-    parse_palette
+    log_info "Starting bulk conversion of ${#themes_to_convert[@]} themes..."
     
-    # Generate configuration files
-    generate_mangowc_config "$theme_output_dir"
-    generate_waybar_style "$theme_output_dir"
-    generate_terminal_config "$theme_output_dir"
-    generate_mako_config "$theme_output_dir"
-    generate_swayosd_config "$theme_output_dir"
+    # Create output directory
+    if [[ "$DRY_RUN" == false ]]; then
+        mkdir -p "$OUTPUT_DIR"
+    fi
     
-    # Generate documentation and installation script
-    generate_install_script "$theme_output_dir"
-    generate_readme "$theme_output_dir"
+    local total=${#themes_to_convert[@]}
+    local current=0
     
-    log_success "Theme conversion completed successfully!"
-    log_info "Converted theme location: $theme_output_dir"
-    log_info "Run './install.sh' in the theme directory to install the theme."
+    for theme_name in "${themes_to_convert[@]}"; do
+        ((current++))
+        echo -e "\n${CYAN}[$current/$total] Processing theme: $theme_name${NC}"
+        
+        if convert_theme "$theme_name"; then
+            CONVERSION_STATS+=("success")
+        else
+            CONVERSION_STATS+=("failed")
+        fi
+    done
+    
+    show_statistics
 }
 
 # Main execution
 main() {
-    log_info "Omarchy to MangoWC Theme Converter v1.0"
-    log_info "========================================="
+    echo -e "${CYAN}Omarchy to MangoWC Bulk Theme Converter v2.0${NC}"
+    echo -e "${CYAN}=============================================${NC}"
     
     parse_args "$@"
-    validate_input
-    convert_theme
+    validate_environment
+    
+    # Discover available themes
+    local available_themes
+    readarray -t available_themes < <(discover_themes)
+    
+    # Determine which themes to convert
+    if [[ "$INTERACTIVE" == true ]]; then
+        select_themes_interactive "${available_themes[@]}"
+    elif [[ ${#SELECTED_THEMES[@]} -gt 0 ]]; then
+        # Validate selected themes
+        local validated_themes=()
+        for theme in "${SELECTED_THEMES[@]}"; do
+            if [[ " ${available_themes[*]} " =~ " $theme " ]]; then
+                validated_themes+=("$theme")
+            else
+                log_warning "Theme not found, skipping: $theme"
+            fi
+        done
+        SELECTED_THEMES=("${validated_themes[@]}")
+    else
+        SELECTED_THEMES=("${available_themes[@]}")
+    fi
+    
+    # Show what will be converted
+    if [[ ${#SELECTED_THEMES[@]} -gt 0 ]]; then
+        echo -e "\n${CYAN}Themes to convert:${NC}"
+        for theme in "${SELECTED_THEMES[@]}"; do
+            echo "  - $theme"
+        done
+    else
+        log_warning "No themes selected for conversion"
+        exit 0
+    fi
+    
+    # Perform conversion
+    convert_all_themes "${SELECTED_THEMES[@]}"
+    
+    if [[ "$DRY_RUN" == false ]]; then
+        echo -e "\n${GREEN}Bulk conversion completed!${NC}"
+        log_info "Converted themes are available in: $OUTPUT_DIR"
+        log_info "Run './install.sh' in each theme directory to install them."
+    else
+        echo -e "\n${YELLOW}Dry run completed. No files were modified.${NC}"
+    fi
 }
 
 # Execute main function with all arguments
