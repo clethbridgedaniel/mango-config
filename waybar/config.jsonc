@@ -20,6 +20,7 @@
         "cpu",
         "temperature",
         "backlight",
+	"battery",
         "clock",
         "custom/notification",
         "custom/power"
@@ -45,7 +46,7 @@
     "dwl/tags": {
       "num-tags": 9,
       "hide-vacant": true,
-      // "tag-labels": ["一", "二", "三", "四", "五", "六", "七", "八", "九"]
+      // "tag-labels": ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
     },
     "dwl/window": {
         "format": "[{layout}]{title}"
@@ -102,7 +103,7 @@
       "ignore-list": ["Rofi", "wofi"]
     },
     "backlight": {
-      "interval": 2,
+      "interval": 5,
       "device": "amdgpu_bl0",
       "format": "{icon} {percent}%",
       "format-icons": ["󰖔", "󰖨"],
@@ -231,11 +232,10 @@
         }
     },
     "battery": {
-        "bat": "hidpp_battery_0",
-        "interval": 1800,
+        "interval": 300,
         "states": {
-                   "warning": 20,
-                   "critical": 10
+                   "warning": 25,
+                   "critical": 12
         },
         "format": "{icon}",
         "format-icons": ["", "", "", "", ""],
